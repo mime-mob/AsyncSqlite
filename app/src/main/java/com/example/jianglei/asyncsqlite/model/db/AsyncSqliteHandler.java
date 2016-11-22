@@ -1,8 +1,5 @@
-平时我们在开发Android应用的时候，数据库操作是无法避免的，之前开发过程中，一直没太去在意在主线程中操作数据库，毕竟一般的数据库操作都在毫秒级的，但是考虑到极限的情况下，万一数据库要插入上万条数据呢，这样就会卡死主线程，导致应用使用不流畅，用户体验很差。
-为了解决这个问题，我找了很多开源的数据库开源框架，比如OrmLite什么的，虽然这些框架都很好用，也很高大上，用了什么映射等等，Api也很简单，但是我觉得作为程序猿，一直使用别人写好的框架，语言也不是原生的数据库操作语言，那如果你用习惯之后，回头想想，你还会随便写出数据库的操作函数吗？
-项目上正好有时间优化，我就去研究了一下异步数据库，我发现Google有一个AsyncQueryHandler这个类，主要用来查询系统级的数据，因为它需要确定的Uri，通过它，我写了一个关于本地数据库异步操作的类，可以给大家分享下。
+package com.example.jianglei.asyncsqlite.model.db;
 
-```
 import android.content.ContentValues;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
@@ -10,8 +7,10 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.Message;
+import android.support.annotation.NonNull;
 
-import com.example.jianglei.asyncsqlite.Logger;
+import com.example.jianglei.asyncsqlite.utils.Logger;
+import com.example.jianglei.asyncsqlite.utils.WeakHandler;
 
 import java.util.List;
 
@@ -20,30 +19,28 @@ import java.util.List;
  * 数据库异步框架
  * Created by jianglei on 2016/4/6.
  */
-public class AsyncHandler extends Handler {
+public class AsyncSqliteHandler extends WeakHandler {
 
     private static final String TAG = "MasAsyncQueryHandler";
 
     public static final long SUCCESS = 1;
     public static final long FAIL = -1;
 
-    private static final int EVENT_ARG_SINGLE_INSERT = 0;
-    private static final int EVENT_ARG_MULTI_INSERT = 1;
-    private static final int EVENT_ARG_QUERY = 2;
-    private static final int EVENT_ARG_UPDATE = 3;
-    private static final int EVENT_ARG_DELETE = 4;
-    private static final int EVENT_INIT_DATABASE = 5;
+    public static final int EVENT_ARG_SINGLE_INSERT = 0;
+    public static final int EVENT_ARG_MULTI_INSERT = 1;
+    public static final int EVENT_ARG_QUERY = 2;
+    public static final int EVENT_ARG_UPDATE = 3;
+    public static final int EVENT_ARG_DELETE = 4;
+    public static final int EVENT_INIT_DATABASE = 5;
 
     private static Looper sLooper = null;
 
-    private Handler mWorkerThreadHandler;
-
-    private IAsyncHandlerCallback mIAsyncHandlerCallback;
+    private WorkerHandler mWorkerThreadHandler;
 
     protected static class SqliteArgs {
         public SQLiteDatabase db;
         public String table;
-        public Handler handler;
+        public WeakHandler handler;
         public IAsyncHandlerCallback callback;
     }
 
@@ -89,16 +86,16 @@ public class AsyncHandler extends Handler {
         public SQLiteDatabase result;
     }
 
-    public AsyncHandler() {
-        super();
-        synchronized (AsyncHandler.class) {
+    public AsyncSqliteHandler(Handler.Callback callback) {
+        super(callback);
+        synchronized (AsyncSqliteHandler.class) {
             if (sLooper == null) {
                 HandlerThread thread = new HandlerThread(TAG);
                 thread.start();
                 sLooper = thread.getLooper();
             }
         }
-        mWorkerThreadHandler = new WorkerHandler(sLooper);
+        mWorkerThreadHandler = new WorkerHandler(sLooper, mWorkerCallback);
     }
 
     /**
@@ -108,7 +105,8 @@ public class AsyncHandler extends Handler {
      * @param dbOpenHelper 数据库
      */
     public void initDataBase(int token, DataBase dbOpenHelper, IInitDatabaseCallback callback) {
-        Message msg = mWorkerThreadHandler.obtainMessage(token);
+        Message msg = new Message();
+        msg.what = token;
         msg.arg1 = EVENT_INIT_DATABASE;
 
         InitArgs args = new InitArgs();
@@ -130,7 +128,8 @@ public class AsyncHandler extends Handler {
      * @param values         插入数据库内容
      */
     public void startSingleInsert(int token, SQLiteDatabase db, String table, String nullColumnHack, ContentValues values, ISingleInsertCallback callback) {
-        Message msg = mWorkerThreadHandler.obtainMessage(token);
+        Message msg = new Message();
+        msg.what = token;
         msg.arg1 = EVENT_ARG_SINGLE_INSERT;
 
         InsertSingleArgs args = new InsertSingleArgs();
@@ -155,7 +154,8 @@ public class AsyncHandler extends Handler {
      * @param valuesList     插入数据库内容
      */
     public void startMultiInsert(int token, SQLiteDatabase db, String table, String nullColumnHack, List<ContentValues> valuesList, IMultiInsertCallback callback) {
-        Message msg = mWorkerThreadHandler.obtainMessage(token);
+        Message msg = new Message();
+        msg.what = token;
         msg.arg1 = EVENT_ARG_MULTI_INSERT;
 
         InsertMultiArgs args = new InsertMultiArgs();
@@ -187,7 +187,8 @@ public class AsyncHandler extends Handler {
      */
     public void startQuery(int token, SQLiteDatabase db, boolean distinct, String table, String[] columns, String whereClause, String[] whereArgs,
                            String groupBy, String having, String orderBy, String limit, IQueryCallback callback) {
-        Message msg = mWorkerThreadHandler.obtainMessage(token);
+        Message msg = new Message();
+        msg.what = token;
         msg.arg1 = EVENT_ARG_QUERY;
 
         QueryArgs args = new QueryArgs();
@@ -219,7 +220,8 @@ public class AsyncHandler extends Handler {
      * @param whereArgs   条件参数数组
      */
     public void startUpdate(int token, SQLiteDatabase db, String table, ContentValues values, String whereClause, String[] whereArgs, IUpdateCallback callback) {
-        Message msg = mWorkerThreadHandler.obtainMessage(token);
+        Message msg = new Message();
+        msg.what = token;
         msg.arg1 = EVENT_ARG_UPDATE;
 
         UpdateArgs args = new UpdateArgs();
@@ -245,7 +247,8 @@ public class AsyncHandler extends Handler {
      * @param whereArgs   条件参数数组
      */
     public void startDelete(int token, SQLiteDatabase db, String table, String whereClause, String[] whereArgs, IDeleteCallback callback) {
-        Message msg = mWorkerThreadHandler.obtainMessage(token);
+        Message msg = new Message();
+        msg.what = token;
         msg.arg1 = EVENT_ARG_DELETE;
 
         DeleteArgs args = new DeleteArgs();
@@ -263,14 +266,15 @@ public class AsyncHandler extends Handler {
     /**
      * 数据库处理
      */
-    protected class WorkerHandler extends Handler {
-        public WorkerHandler(Looper looper) {
-            super(looper);
+    protected class WorkerHandler extends WeakHandler {
+        public WorkerHandler(@NonNull Looper looper, @NonNull Handler.Callback callback) {
+            super(looper, callback);
         }
+    }
 
+    private Handler.Callback mWorkerCallback = new Handler.Callback() {
         @Override
-        public void handleMessage(Message msg) {
-            super.handleMessage(msg);
+        public boolean handleMessage(Message msg) {
             int token = msg.what;
             int event = msg.arg1;
 
@@ -281,23 +285,26 @@ public class AsyncHandler extends Handler {
             DeleteArgs deleteArgs;
             InitArgs initArgs;
 
-            Message reply;
+            Message reply = new Message();
+            reply.what = token;
             switch (event) {
                 case EVENT_ARG_SINGLE_INSERT:
                     insertSingleArgs = (InsertSingleArgs) msg.obj;
+                    if (insertSingleArgs.db == null) {
+                        return false;
+                    }
                     insertSingleArgs.result = insertSingleArgs.db.insertOrThrow(insertSingleArgs.table,
                             insertSingleArgs.nullColumnHack, insertSingleArgs.values);
                     if ((int) insertSingleArgs.result == -1) {
                         Logger.e(TAG + " ---->> insert single args failed!");
-                        insertSingleArgs.result = FAIL;
-                    } else {
-                        insertSingleArgs.result = SUCCESS;
                     }
-                    reply = insertSingleArgs.handler.obtainMessage(token);
                     reply.obj = insertSingleArgs;
                     break;
                 case EVENT_ARG_MULTI_INSERT:
                     insertMultiArgs = (InsertMultiArgs) msg.obj;
+                    if (insertMultiArgs.db == null) {
+                        return false;
+                    }
                     insertMultiArgs.db.beginTransaction();
                     for (ContentValues values : insertMultiArgs.valuesList) {
                         insertMultiArgs.result = insertMultiArgs.db.insertOrThrow(insertMultiArgs.table,
@@ -312,11 +319,13 @@ public class AsyncHandler extends Handler {
                     }
                     insertMultiArgs.db.setTransactionSuccessful();
                     insertMultiArgs.db.endTransaction();
-                    reply = insertMultiArgs.handler.obtainMessage(token);
                     reply.obj = insertMultiArgs;
                     break;
                 case EVENT_ARG_QUERY:
                     queryArgs = (QueryArgs) msg.obj;
+                    if (queryArgs.db == null) {
+                        return false;
+                    }
                     Cursor cursor;
                     try {
                         cursor = queryArgs.db.query(queryArgs.distinct, queryArgs.table,
@@ -331,11 +340,13 @@ public class AsyncHandler extends Handler {
                         cursor = null;
                     }
                     queryArgs.result = cursor;
-                    reply = queryArgs.handler.obtainMessage(token);
                     reply.obj = queryArgs;
                     break;
                 case EVENT_ARG_UPDATE:
                     updateArgs = (UpdateArgs) msg.obj;
+                    if (updateArgs.db == null) {
+                        return false;
+                    }
                     updateArgs.result = updateArgs.db.update(updateArgs.table, updateArgs.values, updateArgs.whereClause, updateArgs.whereArgs);
                     if ((int) updateArgs.result <= 0) {
                         Logger.e(TAG + " ---->> update args failed!");
@@ -343,11 +354,13 @@ public class AsyncHandler extends Handler {
                     } else {
                         updateArgs.result = SUCCESS;
                     }
-                    reply = updateArgs.handler.obtainMessage(token);
                     reply.obj = updateArgs;
                     break;
                 case EVENT_ARG_DELETE:
                     deleteArgs = (DeleteArgs) msg.obj;
+                    if (deleteArgs.db == null) {
+                        return false;
+                    }
                     deleteArgs.result = deleteArgs.db.delete(deleteArgs.table, deleteArgs.whereClause, deleteArgs.whereArgs);
                     if ((int) deleteArgs.result <= 0) {
                         Logger.e(TAG + " ---->> delete args failed!");
@@ -355,160 +368,23 @@ public class AsyncHandler extends Handler {
                     } else {
                         deleteArgs.result = SUCCESS;
                     }
-                    reply = deleteArgs.handler.obtainMessage(token);
                     reply.obj = deleteArgs;
                     break;
                 case EVENT_INIT_DATABASE:
                     initArgs = (InitArgs) msg.obj;
+                    if (initArgs.dbOpenHelper == null) {
+                        return false;
+                    }
                     initArgs.result = initArgs.dbOpenHelper.getWritableDatabase();
-                    reply = initArgs.handler.obtainMessage(token);
                     reply.obj = initArgs;
                     break;
                 default:
-                    return;
+                    return false;
             }
             reply.arg1 = msg.arg1;
-            reply.sendToTarget();
+            sendMessage(reply);
+            return false;
         }
-    }
-
-    /**
-     * 数据库处理结果回调
-     */
-    @Override
-    public void handleMessage(Message msg) {
-        super.handleMessage(msg);
-        int token = msg.what;
-        int event = msg.arg1;
-
-        switch (event) {
-            case EVENT_ARG_SINGLE_INSERT:
-                InsertSingleArgs insertSingleArgs = (InsertSingleArgs) msg.obj;
-                if (insertSingleArgs.callback != null) {
-                    if (insertSingleArgs.result == SUCCESS) {
-                        ((ISingleInsertCallback) insertSingleArgs.callback).onSingleInsertComplete(token, insertSingleArgs.result);
-                    } else {
-                        insertSingleArgs.callback.onAsyncOperateFailed();
-                    }
-                }
-                break;
-            case EVENT_ARG_MULTI_INSERT:
-                InsertMultiArgs insertMultiArgs = (InsertMultiArgs) msg.obj;
-                if (insertMultiArgs.callback != null) {
-                    if (insertMultiArgs.result ==SUCCESS) {
-                        ((IMultiInsertCallback) insertMultiArgs.callback).onMultiInsertComplete(token, insertMultiArgs.result);
-                    } else {
-                        insertMultiArgs.callback.onAsyncOperateFailed();
-                    }
-                }
-                break;
-            case EVENT_ARG_QUERY:
-                QueryArgs queryArgs = (QueryArgs) msg.obj;
-                if (queryArgs.callback != null) {
-                    if (queryArgs.result != null) {
-                        ((IQueryCallback) queryArgs.callback).onQueryComplete(token, queryArgs.result);
-                    } else {
-                        queryArgs.callback.onAsyncOperateFailed();
-                    }
-                }
-                break;
-            case EVENT_ARG_UPDATE:
-                UpdateArgs updateArgs = (UpdateArgs) msg.obj;
-                if (updateArgs.callback != null) {
-                    if (updateArgs.result == SUCCESS) {
-                        ((IUpdateCallback) updateArgs.callback).onUpdateComplete(token, updateArgs.result);
-                    } else {
-                        updateArgs.callback.onAsyncOperateFailed();
-                    }
-                }
-                break;
-            case EVENT_ARG_DELETE:
-                DeleteArgs deleteArgs = (DeleteArgs) msg.obj;
-                if (deleteArgs.callback != null) {
-                    if (deleteArgs.result == SUCCESS) {
-                        ((IDeleteCallback) deleteArgs.callback).onDeleteComplete(token, deleteArgs.result);
-                    } else {
-                        deleteArgs.callback.onAsyncOperateFailed();
-                    }
-                }
-                break;
-            case EVENT_INIT_DATABASE:
-                InitArgs initArgs = (InitArgs) msg.obj;
-                if (initArgs.callback != null) {
-                    if (initArgs.result != null) {
-                        ((IInitDatabaseCallback) initArgs.callback).onInitDatabaseComplete(token, initArgs.result);
-                    } else {
-                        initArgs.callback.onAsyncOperateFailed();
-                    }
-                }
-                break;
-            default:
-                return;
-        }
-    }
-}
-
-```
-如上，即为主要的异步类，主要是先通过一个Handler去操作数据库，然后用另一个Handler去回调给调用者，注意其中的Looper不是主线程的消息队列，下面是异步操作的回调，用于通知发起数据库操作的地方这次数据库操作的结果：
-
-```
-/**
- * 数据库异步操作结果回调基类
- * Created by jianglei on 2016/4/6.
- */
-public interface IAsyncHandlerCallback {
-
-    void onAsyncOperateFailed();
+    };
 
 }
-
-public interface IInitDatabaseCallback extends IAsyncHandlerCallback {
-
-    /**
-     * 初始化成功
-     */
-    void onInitDatabaseComplete(int token, SQLiteDatabase db);
-}
-
-public interface ISingleInsertCallback extends IAsyncHandlerCallback {
-    /**
-     * 单条插入成功
-     */
-    void onSingleInsertComplete(int token, long result);
-}
-
-public interface IMultiInsertCallback extends IAsyncHandlerCallback {
-
-    /**
-     * 多条插入成功
-     */
-    void onMultiInsertComplete(int token, long result);
-}
-
-public interface IQueryCallback extends IAsyncHandlerCallback{
-
-    /**
-     * 查询成功
-     */
-    void onQueryComplete(int token, Cursor cursor);
-}
-
-public interface IUpdateCallback extends IAsyncHandlerCallback {
-
-    /**
-     * 更新成功
-     */
-    void onUpdateComplete(int token, long result);
-}
-
-public interface IDeleteCallback extends IAsyncHandlerCallback {
-
-    /**
-     * 删除成功
-     */
-    void onDeleteComplete(int token, long result);
-}
-```
-使用也是很简单的，在项目上，在自定义的DataBaseOpenHelper中初始化的时候初始化一下，然后实现下上面的接口，就可以通过这个DataBaseOpenHelper区调用方法异步操作数据库，这样就不会影响主线程的操作，大家可以使用StrictMode去检测下。
-
-下面是我自定义的异步数据库操作，欢迎大家看看和提出问题：https://github.com/jianglei199212/AsyncSqlite
